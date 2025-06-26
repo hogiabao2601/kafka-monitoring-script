@@ -5,6 +5,10 @@
 
 # Configuration
 BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+SSL_CONFIG_PATH="${SSL_CONFIG_PATH:-../config/ssl.conf}"
+PRODUCER_CONFIG_PATH="${PRODUCER_CONFIG_PATH:-../config/producer.properties}"
+CONSUMER_CONFIG_PATH="${CONSUMER_CONFIG_PATH:-../config/consumer.properties}"
+
 LOG_FILE="${LOG_FILE:-uuid_topic_monitor.log}"
 METRICS_FILE="${METRICS_FILE:-uuid_topic_metrics.csv}"
 CHECK_INTERVAL="${CHECK_INTERVAL:-2}"  # seconds between checks
@@ -34,6 +38,7 @@ init_monitoring() {
     
     echo -e "${GREEN}✅ UUID Topic Monitor initialized${NC}"
     echo "Bootstrap Servers: $BOOTSTRAP_SERVERS"
+    echo "Topic prefix: $TOPIC_PREFIX"
     echo "Log File: $LOG_FILE"
     echo "Metrics File: $METRICS_FILE"
     echo "Check Interval: ${CHECK_INTERVAL}s"
@@ -63,7 +68,7 @@ get_topic_details() {
     local topic_name="$1"
     local details
     
-    details=$(kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+    details=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH"\
               --describe --topic "$topic_name" 2>/dev/null)
     
     if [ $? -eq 0 ] && [ -n "$details" ]; then
@@ -89,7 +94,7 @@ verify_topic_ready() {
     while [ $elapsed_ms -lt $timeout_ms ]; do
         # Check if topic exists and has leader for all partitions
         local describe_output
-        describe_output=$(kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+        describe_output=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" \
                          --describe --topic "$topic_name" 2>/dev/null)
         
         if [ $? -eq 0 ] && [ -n "$describe_output" ]; then
@@ -135,8 +140,9 @@ test_topic_operations() {
     local test_key="test-key-$(date +%s)"
     
     # Test produce
-    echo "$test_message" | kafka-console-producer.sh \
+    echo "$test_message" | ./kafka-console-producer.sh \
         --bootstrap-server "$BOOTSTRAP_SERVERS" \
+        --producer.config  "$PRODUCER_CONFIG_PATH" \
         --topic "$topic_name" \
         --property "key.separator=:" \
         --property "parse.key=true" \
@@ -149,9 +155,10 @@ EOF
     if [ $produce_result -eq 0 ]; then
         # Test consume - try to read back the message
         local consumed_message
-        consumed_message=$(kafka-console-consumer.sh \
+        consumed_message=$(./kafka-console-consumer.sh \
                           --bootstrap-server "$BOOTSTRAP_SERVERS" \
                           --topic "$topic_name" \
+                          --consumer.config "$CONSUMER_CONFIG_PATH"\
                           --from-beginning \
                           --max-messages 1 \
                           --timeout-ms 5000 2>/dev/null | head -1)
@@ -181,7 +188,7 @@ monitor_new_topics() {
     local current_topics_file="/tmp/kafka_topics_current_$$"
     
     # Get initial topic list
-    kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --list 2>/dev/null | \
+    ./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null | \
         grep -E "${TOPIC_PREFIX}${UUID_PATTERN}" > "$previous_topics_file" 2>/dev/null
     
     echo -e "${BLUE}🔍 Monitoring UUID topics (Pattern: ${TOPIC_PREFIX}${UUID_PATTERN})${NC}"
@@ -191,15 +198,15 @@ monitor_new_topics() {
     while true; do
         local current_time=$(date '+%Y-%m-%d %H:%M:%S')
         local current_timestamp=$(date '+%Y-%m-%d %H:%M:%S.%3N')
-        
+
         # Get current topic list
-        kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --list 2>/dev/null | \
+        ./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null | \
             grep -E "${TOPIC_PREFIX}${UUID_PATTERN}" > "$current_topics_file" 2>/dev/null
         
-        # Find new topics
+        # Alternative method using diff
         if [ -f "$previous_topics_file" ]; then
             local new_topics
-            new_topics=$(comm -13 <(sort "$previous_topics_file") <(sort "$current_topics_file") 2>/dev/null)
+            new_topics=$(diff "$previous_topics_file" "$current_topics_file" 2>/dev/null | grep "^>" | sed 's/^> //')
             
             if [ -n "$new_topics" ]; then
                 while IFS= read -r topic; do
@@ -301,7 +308,7 @@ analyze_existing_topics() {
     echo -e "${BLUE}🔍 Analyzing existing UUID topics...${NC}"
     
     local all_topics
-    all_topics=$(kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --list 2>/dev/null)
+    all_topics=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null)
     
     local uuid_topics=()
     while IFS= read -r topic; do
@@ -464,7 +471,7 @@ cleanup_old_topics() {
     echo -e "${BLUE}🧹 Checking for old UUID topics (max age: ${max_age_seconds}s)...${NC}"
     
     local all_topics
-    all_topics=$(kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --list 2>/dev/null)
+    all_topics=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null)
     
     local old_topics=()
     local current_time=$(date +%s)
@@ -489,7 +496,7 @@ cleanup_old_topics() {
         if [ "$dry_run" = "false" ]; then
             echo -e "${YELLOW}⚠️  Automatic cleanup disabled for safety${NC}"
             echo "To delete topics manually, use:"
-            echo "kafka-topics.sh --bootstrap-server $BOOTSTRAP_SERVERS --delete --topic TOPIC_NAME"
+            echo "./kafka-topics.sh --bootstrap-server $BOOTSTRAP_SERVERS --command-config "$SSL_CONFIG_PATH" --delete --topic TOPIC_NAME"
         fi
     fi
     
@@ -520,10 +527,14 @@ OPTIONS:
 
 ENVIRONMENT VARIABLES:
   KAFKA_BOOTSTRAP_SERVERS      Bootstrap servers
+  SSL_CONFIG_PATH              SSL configuration path
+  PRODUCER_CONFIG_PATH         Producer configuration path
+  CONSUMER_CONFIG_PATH         Consumer configuration path
   TOPIC_PREFIX                 Topic prefix
   CHECK_INTERVAL              Check interval in seconds
   LOG_FILE                    Log file path
   METRICS_FILE                Metrics file path
+
 
 EXAMPLES:
   $0 monitor                                    # Start monitoring

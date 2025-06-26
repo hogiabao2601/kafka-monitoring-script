@@ -583,6 +583,7 @@ case $COMMAND in
         ;;
     slack)
         create_slack_notifier "$CONFIG_FILE"
+        
         ;;
     enhanced)
         create_enhanced_health_check "$CONFIG_FILE"

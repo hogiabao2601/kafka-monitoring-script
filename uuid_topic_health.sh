@@ -4,6 +4,9 @@
 # Quick health check for UUID topic creation performance
 
 BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+SSL_CONFIG_PATH="${SSL_CONFIG_PATH:-../config/ssl.conf}"
+PRODUCER_CONFIG_PATH="${PRODUCER_CONFIG_PATH:-../config/producer.properties}"
+CONSUMER_CONFIG_PATH="${CONSUMER_CONFIG_PATH:-../config/consumer.properties}"
 METRICS_FILE="${METRICS_FILE:-uuid_topic_metrics.csv}"
 ALERT_EMAIL="${ALERT_EMAIL:-ops@company.com}"
 
@@ -19,6 +22,72 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
+
+# Function to safely check if a value is numeric and greater than threshold
+is_numeric() {
+    local value="$1"
+    [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]
+}
+
+is_greater_than() {
+    local value="$1"
+    local threshold="$2"
+    
+    # Set defaults if empty
+    value="${value:-0}"
+    threshold="${threshold:-0}"
+    
+    # Check if both values are numeric
+    if ! is_numeric "$value" || ! is_numeric "$threshold"; then
+        return 1
+    fi
+    
+    # Use awk for comparison to handle decimals
+    local result=$(awk "BEGIN {print ($value > $threshold) ? 1 : 0}")
+    [ "$result" -eq 1 ]
+}
+
+# Function to safely check if a value is greater than or equal to threshold
+is_greater_equal() {
+    local value="$1"
+    local threshold="$2"
+    
+    # Set defaults if empty
+    value="${value:-0}"
+    threshold="${threshold:-0}"
+    
+    # Check if both values are numeric
+    if ! is_numeric "$value" || ! is_numeric "$threshold"; then
+        return 1
+    fi
+    
+    # Use awk for comparison to handle decimals
+    local result=$(awk "BEGIN {print ($value >= $threshold) ? 1 : 0}")
+    [ "$result" -eq 1 ]
+}
+
+# Debug function to show all variable values
+debug_variables() {
+    if [ "${DEBUG:-false}" = "true" ]; then
+        echo "=== DEBUG: Variable Values ==="
+        echo "LOG_FILE: [$LOG_FILE]"
+        echo "TIME_WINDOW: [$TIME_WINDOW]"
+        echo "total_topics: [$total_topics]"
+        echo "ready_topics: [$ready_topics]"
+        echo "failed_topics: [$failed_topics]"
+        echo "creating_topics: [$creating_topics]"
+        echo "success_rate: [$success_rate]"
+        echo "error_rate: [$error_rate]"
+        echo "avg_latency: [$avg_latency]"
+        echo "max_latency: [$max_latency]"
+        echo "p95_latency: [$p95_latency]"
+        echo "LATENCY_WARNING: [$LATENCY_WARNING]"
+        echo "LATENCY_CRITICAL: [$LATENCY_CRITICAL]"
+        echo "ERROR_RATE_WARNING: [$ERROR_RATE_WARNING]"
+        echo "ERROR_RATE_CRITICAL: [$ERROR_RATE_CRITICAL]"
+        echo "=========================="
+    fi
+}
 
 # Function to check recent topic creation health
 check_topic_creation_health() {
@@ -55,12 +124,18 @@ check_topic_creation_health() {
     local ready_topics=$(echo "$recent_entries" | awk -F',' '$8=="ready" || $8=="operational"' | wc -l)
     local failed_topics=$(echo "$recent_entries" | awk -F',' '$8=="not_ready" || $8=="failed"' | wc -l)
     
+    # Calculate success and error rates safely
     local success_rate=0
-    if [ $total_topics -gt 0 ]; then
-        success_rate=$(echo "scale=1; $ready_topics * 100 / $total_topics" | bc -l)
+    local error_rate=0
+    
+    if [ "$total_topics" -gt 0 ] 2>/dev/null; then
+        success_rate=$(awk "BEGIN {printf \"%.1f\", $ready_topics * 100 / $total_topics}")
+        error_rate=$(awk "BEGIN {printf \"%.1f\", $failed_topics * 100 / $total_topics}")
     fi
     
-    local error_rate=$(echo "scale=1; $failed_topics * 100 / $total_topics" | bc -l)
+    # Ensure rates are numeric
+    success_rate=${success_rate:-0}
+    error_rate=${error_rate:-0}
     
     # Calculate latency statistics
     local latencies=$(echo "$recent_entries" | awk -F',' '$4 != "unknown" && $4 > 0 {print $4}' | sort -n)
@@ -98,32 +173,35 @@ check_topic_creation_health() {
     local health_status="healthy"
     local alerts=()
     
-    # Check error rate
-    if [ "$(echo "$error_rate >= $ERROR_RATE_CRITICAL" | bc -l)" -eq 1 ]; then
+    # Check error rate using safe comparison
+    if is_greater_equal "$error_rate" "$ERROR_RATE_CRITICAL"; then
         health_status="critical"
         alerts+=("CRITICAL: Error rate is ${error_rate}% (threshold: ${ERROR_RATE_CRITICAL}%)")
-    elif [ "$(echo "$error_rate >= $ERROR_RATE_WARNING" | bc -l)" -eq 1 ]; then
+    elif is_greater_equal "$error_rate" "$ERROR_RATE_WARNING"; then
         if [ "$health_status" = "healthy" ]; then
             health_status="warning"
         fi
         alerts+=("WARNING: Error rate is ${error_rate}% (threshold: ${ERROR_RATE_WARNING}%)")
     fi
     
-    # Check latency
-    if [ $avg_latency -gt $LATENCY_CRITICAL ]; then
+    # Add debug output
+    debug_variables
+    
+    # Check latency using safe comparison function
+    if is_greater_than "$avg_latency" "$LATENCY_CRITICAL"; then
         health_status="critical"
         alerts+=("CRITICAL: Average latency is ${avg_latency}ms (threshold: ${LATENCY_CRITICAL}ms)")
-    elif [ $avg_latency -gt $LATENCY_WARNING ]; then
+    elif is_greater_than "$avg_latency" "$LATENCY_WARNING"; then
         if [ "$health_status" = "healthy" ]; then
             health_status="warning"
         fi
         alerts+=("WARNING: Average latency is ${avg_latency}ms (threshold: ${LATENCY_WARNING}ms)")
     fi
     
-    if [ $p95_latency -gt $LATENCY_CRITICAL ]; then
+    if is_greater_than "$p95_latency" "$LATENCY_CRITICAL"; then
         health_status="critical"
         alerts+=("CRITICAL: 95th percentile latency is ${p95_latency}ms (threshold: ${LATENCY_CRITICAL}ms)")
-    elif [ $p95_latency -gt $LATENCY_WARNING ]; then
+    elif is_greater_than "$p95_latency" "$LATENCY_WARNING"; then
         if [ "$health_status" = "healthy" ]; then
             health_status="warning"
         fi
@@ -247,8 +325,19 @@ show_creation_rate() {
     
     local total_topics=$(echo "$recent_entries" | wc -l)
     local time_window_seconds=$((time_window_hours * 3600))
-    local topics_per_hour=$(echo "scale=2; $total_topics * 3600 / $time_window_seconds" | bc -l)
-    local topics_per_minute=$(echo "scale=2; $topics_per_hour / 60" | bc -l)
+    # Calculate rate metrics safely
+    local time_window_seconds=3600  # 1 hour
+    local topics_per_hour=0
+    local topics_per_minute=0
+    
+    if [ "$total_topics" -gt 0 ] 2>/dev/null; then
+        topics_per_hour=$(awk "BEGIN {printf \"%.2f\", $total_topics * 3600 / $time_window_seconds}")
+        topics_per_minute=$(awk "BEGIN {printf \"%.2f\", $topics_per_hour / 60}")
+    fi
+    
+    # Ensure rates are numeric
+    topics_per_hour=${topics_per_hour:-0}
+    topics_per_minute=${topics_per_minute:-0}
     
     echo "Total Topics: $total_topics"
     echo "Rate: $topics_per_hour topics/hour"
@@ -276,7 +365,7 @@ check_kafka_health() {
     
     # Test connectivity
     echo "1. Testing Kafka connectivity..."
-    if kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --list &>/dev/null; then
+    if ./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list &>/dev/null; then
         echo -e "   ${GREEN}✅ Connected to Kafka${NC}"
     else
         echo -e "   ${RED}❌ Cannot connect to Kafka${NC}"
@@ -286,7 +375,7 @@ check_kafka_health() {
     # Check broker count
     echo "2. Checking broker information..."
     local broker_info
-    broker_info=$(kafka-broker-api-versions.sh --bootstrap-server "$BOOTSTRAP_SERVERS" 2>/dev/null)
+    broker_info=$(./kafka-broker-api-versions.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" 2>/dev/null)
     
     if [ -n "$broker_info" ]; then
         local broker_count=$(echo "$broker_info" | grep -c "^[0-9]")
@@ -299,12 +388,12 @@ check_kafka_health() {
     echo "3. Testing topic creation capability..."
     local test_topic="health-check-$(date +%s)"
     
-    if kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+    if ./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" \
        --create --topic "$test_topic" --partitions 1 --replication-factor 1 &>/dev/null; then
         echo -e "   ${GREEN}✅ Topic creation works${NC}"
         
         # Clean up test topic
-        kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+        ./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" \
                        --delete --topic "$test_topic" &>/dev/null
     else
         echo -e "   ${RED}❌ Topic creation failed${NC}"

@@ -4,7 +4,10 @@
 # Creates test topics with UUID names to simulate client requests
 
 BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
-TOPIC_PREFIX="${TOPIC_PREFIX:-user-request-}"
+SSL_CONFIG_PATH="${SSL_CONFIG_PATH:-../config/ssl.conf}"
+PRODUCER_CONFIG_PATH="${PRODUCER_CONFIG_PATH:-../config/producer.properties}"
+CONSUMER_CONFIG_PATH="${CONSUMER_CONFIG_PATH:-../config/consumer.properties}"
+TOPIC_PREFIX="${TOPIC_PREFIX:-}"
 DEFAULT_PARTITIONS="${DEFAULT_PARTITIONS:-3}"
 DEFAULT_REPLICATION="${DEFAULT_REPLICATION:-1}"
 
@@ -36,12 +39,14 @@ generate_uuid() {
 
 # Function to create a single UUID topic with timing
 create_uuid_topic() {
+    echo "--------"
     local partitions="${1:-$DEFAULT_PARTITIONS}"
     local replication="${2:-$DEFAULT_REPLICATION}"
     local prefix="${3:-$TOPIC_PREFIX}"
-    
+    echo $prefix
     local uuid=$(generate_uuid)
     local topic_name="${prefix}${uuid}"
+    echo $prefix
     
     echo -e "${BLUE}🚀 Creating topic: $topic_name${NC}"
     echo "  UUID: $uuid"
@@ -54,7 +59,7 @@ create_uuid_topic() {
     
     # Create the topic
     local create_output
-    create_output=$(kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+    create_output=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH"\
                    --create \
                    --topic "$topic_name" \
                    --partitions "$partitions" \
@@ -80,7 +85,7 @@ create_uuid_topic() {
         local attempt=0
         
         while [ $attempt -lt $max_attempts ] && [ "$ready" = false ]; do
-            if kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+            if ./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH"\
                --describe --topic "$topic_name" &>/dev/null; then
                 ready=true
             else
@@ -97,7 +102,7 @@ create_uuid_topic() {
             
             # Get topic details
             local topic_details
-            topic_details=$(kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" \
+            topic_details=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH"\
                            --describe --topic "$topic_name" 2>/dev/null)
             
             echo "  📊 Topic Details:"
@@ -465,8 +470,8 @@ done
 
 # Verify Kafka connectivity
 echo -e "${BLUE}🔍 Verifying Kafka connectivity...${NC}"
-if ! kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --list &>/dev/null; then
-    echo -e "${RED}❌ Cannot connect to Kafka at $BOOTSTRAP_SERVERS${NC}"
+if ! ./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list &>/dev/null; then
+    echo -e "${RED}❌ Cannot connect to Kafka at $BOOTSTRAP_SERVERS${NC} with $SSL_CONFIG_PATH"
     echo "Please check your bootstrap servers configuration."
     exit 1
 fi
