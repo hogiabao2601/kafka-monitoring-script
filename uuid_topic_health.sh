@@ -3,7 +3,7 @@
 # UUID Topic Health Check Script
 # Quick health check for UUID topic creation performance
 
-BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
 SSL_CONFIG_PATH="${SSL_CONFIG_PATH:-../config/ssl.conf}"
 PRODUCER_CONFIG_PATH="${PRODUCER_CONFIG_PATH:-../config/producer.properties}"
 CONSUMER_CONFIG_PATH="${CONSUMER_CONFIG_PATH:-../config/consumer.properties}"
@@ -276,7 +276,7 @@ $(printf "%s\n" "${alerts[@]}")
 Please investigate the Kafka cluster and topic creation performance.
 
 Metrics file: $METRICS_FILE
-Bootstrap servers: $BOOTSTRAP_SERVERS
+Bootstrap servers: $KAFKA_BOOTSTRAP_SERVERS
 EOF
     
     echo "Alert email sent to: $ALERT_EMAIL"
@@ -457,7 +457,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --bootstrap-servers)
-            BOOTSTRAP_SERVERS="$2"
+            KAFKA_BOOTSTRAP_SERVERS="$2"
             shift 2
             ;;
         --metrics-file)

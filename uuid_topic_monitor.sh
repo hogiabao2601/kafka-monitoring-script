@@ -4,7 +4,7 @@
 # Monitors Kafka topics with UUID patterns and measures creation performance
 
 # Configuration
-BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
+KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
 SSL_CONFIG_PATH="${SSL_CONFIG_PATH:-../config/ssl.conf}"
 PRODUCER_CONFIG_PATH="${PRODUCER_CONFIG_PATH:-../config/producer.properties}"
 CONSUMER_CONFIG_PATH="${CONSUMER_CONFIG_PATH:-../config/consumer.properties}"
@@ -37,7 +37,7 @@ init_monitoring() {
     fi
     
     echo -e "${GREEN}✅ UUID Topic Monitor initialized${NC}"
-    echo "Bootstrap Servers: $BOOTSTRAP_SERVERS"
+    echo "Bootstrap Servers: $KAFKA_BOOTSTRAP_SERVERS"
     echo "Topic prefix: $TOPIC_PREFIX"
     echo "Log File: $LOG_FILE"
     echo "Metrics File: $METRICS_FILE"
@@ -68,7 +68,7 @@ get_topic_details() {
     local topic_name="$1"
     local details
     
-    details=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH"\
+    details=$(./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH"\
               --describe --topic "$topic_name" 2>/dev/null)
     
     if [ $? -eq 0 ] && [ -n "$details" ]; then
@@ -94,7 +94,7 @@ verify_topic_ready() {
     while [ $elapsed_ms -lt $timeout_ms ]; do
         # Check if topic exists and has leader for all partitions
         local describe_output
-        describe_output=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" \
+        describe_output=$(./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" \
                          --describe --topic "$topic_name" 2>/dev/null)
         
         if [ $? -eq 0 ] && [ -n "$describe_output" ]; then
@@ -141,7 +141,7 @@ test_topic_operations() {
     
     # Test produce
     echo "$test_message" | ./kafka-console-producer.sh \
-        --bootstrap-server "$BOOTSTRAP_SERVERS" \
+        --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" \
         --producer.config  "$PRODUCER_CONFIG_PATH" \
         --topic "$topic_name" \
         --property "key.separator=:" \
@@ -156,13 +156,12 @@ EOF
         # Test consume - try to read back the message
         local consumed_message
         consumed_message=$(./kafka-console-consumer.sh \
-                          --bootstrap-server "$BOOTSTRAP_SERVERS" \
+                          --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" \
                           --topic "$topic_name" \
                           --consumer.config "$CONSUMER_CONFIG_PATH"\
                           --from-beginning \
                           --max-messages 1 \
                           --timeout-ms 5000 2>/dev/null | head -1)
-        
         local consume_result=$?
         local test_end=$(date +%s%3N)
         local operation_latency=$((test_end - test_start))
@@ -188,7 +187,7 @@ monitor_new_topics() {
     local current_topics_file="/tmp/kafka_topics_current_$$"
     
     # Get initial topic list
-    ./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null | \
+    ./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null | \
         grep -E "${TOPIC_PREFIX}${UUID_PATTERN}" > "$previous_topics_file" 2>/dev/null
     
     echo -e "${BLUE}🔍 Monitoring UUID topics (Pattern: ${TOPIC_PREFIX}${UUID_PATTERN})${NC}"
@@ -200,7 +199,7 @@ monitor_new_topics() {
         local current_timestamp=$(date '+%Y-%m-%d %H:%M:%S.%3N')
 
         # Get current topic list
-        ./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null | \
+        ./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null | \
             grep -E "${TOPIC_PREFIX}${UUID_PATTERN}" > "$current_topics_file" 2>/dev/null
         
         # Alternative method using diff
@@ -308,7 +307,7 @@ analyze_existing_topics() {
     echo -e "${BLUE}🔍 Analyzing existing UUID topics...${NC}"
     
     local all_topics
-    all_topics=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null)
+    all_topics=$(./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null)
     
     local uuid_topics=()
     while IFS= read -r topic; do
@@ -471,7 +470,7 @@ cleanup_old_topics() {
     echo -e "${BLUE}🧹 Checking for old UUID topics (max age: ${max_age_seconds}s)...${NC}"
     
     local all_topics
-    all_topics=$(./kafka-topics.sh --bootstrap-server "$BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null)
+    all_topics=$(./kafka-topics.sh --bootstrap-server "$KAFKA_BOOTSTRAP_SERVERS" --command-config "$SSL_CONFIG_PATH" --list 2>/dev/null)
     
     local old_topics=()
     local current_time=$(date +%s)
@@ -496,7 +495,7 @@ cleanup_old_topics() {
         if [ "$dry_run" = "false" ]; then
             echo -e "${YELLOW}⚠️  Automatic cleanup disabled for safety${NC}"
             echo "To delete topics manually, use:"
-            echo "./kafka-topics.sh --bootstrap-server $BOOTSTRAP_SERVERS --command-config "$SSL_CONFIG_PATH" --delete --topic TOPIC_NAME"
+            echo "./kafka-topics.sh --bootstrap-server $KAFKA_BOOTSTRAP_SERVERS --command-config "$SSL_CONFIG_PATH" --delete --topic TOPIC_NAME"
         fi
     fi
     
